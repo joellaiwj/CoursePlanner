@@ -10,6 +10,13 @@ const workflow = [
   ["04", "Align & Refine", "Check alignment between outcomes, assessment and learning activities"],
   ["05", "Review & Finalise", "Check alignment between outcomes, assessment and learning activities"],
 ];
+const workflowSections = [
+  [0, 1, 2],
+  [4],
+  [3, 5, 6],
+  [1, 2, 3, 4, 5, 6],
+  [0, 1, 2, 3, 4, 5, 6],
+];
 const initialSections = [
   ["Course Information", "Course code: CS4008\nCourse title: Artificial Intelligence Literacies"],
   ["Course Aims", "Develop the critical awareness and practical judgment needed to engage with AI thoughtfully and responsibly."],
@@ -139,6 +146,7 @@ export default function Home() {
   const [courseCode, setCourseCode] = useState("CS4008");
   const [courseTitle, setCourseTitle] = useState("Artificial Intelligence Literacies");
   const [activeStep, setActiveStep] = useState(2);
+  const [focusedSections, setFocusedSections] = useState<number[]>([]);
   const [sections, setSections] = useState(initialSections);
   const [outcomes, setOutcomes] = useState([
     "Evaluate AI-generated outputs critically.",
@@ -184,13 +192,11 @@ export default function Home() {
     const file = list?.[0];
     if (file) setCourseFile(file.name);
   };
-  const send = async () => {
-    const request = message.trim();
+  const runCourseCoherence = async (request: string, displayRequest = request) => {
     if (!request || running) return;
     setRunning(true);
     setSpecialistError("");
-    setMessage("");
-    setChat((current) => [...current, { role: "user", text: request }]);
+    setChat((current) => [...current, { role: "user", text: displayRequest }]);
     try {
       const response = await fetch("/api/course-coherence", {
         method: "POST",
@@ -215,6 +221,24 @@ export default function Home() {
     } finally {
       setRunning(false);
     }
+  };
+  const send = async () => {
+    const request = message.trim();
+    if (!request || running) return;
+    setMessage("");
+    await runCourseCoherence(request);
+  };
+  const selectWorkflowStep = (index: number) => {
+    const targets = workflowSections[index];
+    setActiveStep(index);
+    setFocusedSections(targets);
+    setOpen(targets);
+    window.setTimeout(() => document.querySelector(`[data-section-index="${targets[0]}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  };
+  const runAlignmentReview = async () => {
+    selectWorkflowStep(3);
+    const request = `Perform a constructive-alignment review of this course design. Check specifically for: (1) intended learning outcomes without assessment evidence; (2) assessments testing outcomes that are not declared; (3) intended learning outcomes without corresponding learning activities in the planned weekly schedule; (4) course-content topics that are not represented in the planned weekly schedule; and (5) opportunities where IDEL, assessment design or AI 4Learn specialists could strengthen alignment. Do not evaluate whether assessment weightings total 100%, because the canvas handles that with its visual checker. Explain the alignment gaps clearly and propose changes only for relevant unlocked sections.`;
+    await runCourseCoherence(request, "Run a constructive-alignment review of this course design.");
   };
   const toggleSubagent = (key: SubagentKey) => {
     if (running) return;
@@ -367,7 +391,8 @@ export default function Home() {
     <div className="workspace">
       <aside className="left-rail">
         <section className="rail-heading"><p className="eyebrow">Course design</p><h2>Course Planning Workflow</h2></section>
-        <nav className="steps" aria-label="Course planning steps">{workflow.map((step, index) => <button key={step[0]} className={activeStep === index ? "step active" : index < activeStep ? "step done" : "step"} onClick={() => setActiveStep(index)}><span>{index < activeStep ? "✓" : step[0]}</span><div><b>{step[1]}</b><small>{step[2]}</small></div></button>)}</nav>
+        <nav className="steps" aria-label="Course planning steps">{workflow.map((step, index) => <button key={step[0]} className={activeStep === index ? "step active" : "step"} onClick={() => selectWorkflowStep(index)}><span>{step[0]}</span><div><b>{step[1]}</b><small>{step[2]}</small></div></button>)}</nav>
+        {activeStep === 3 && <section className="alignment-action"><p><b>Constructive alignment review</b>Check relationships across outcomes, evidence, content and learning activities.</p><button disabled={running} onClick={() => void runAlignmentReview()}>{running ? "Reviewing alignment…" : "✦ Run alignment review"}</button></section>}
         <section className="sources"><div className="section-title"><div><p className="eyebrow">Start from a file</p><h3>Course upload</h3></div>{courseFile && <span>Ready</span>}</div>
           <p className="upload-copy">Upload the original course document to extract its details and populate the initial canvas.</p>
           <button className="dropzone" onClick={() => inputRef.current?.click()}><b>{courseFile ? "↻ Replace course file" : "＋ Upload course file"}</b><small>One PDF, PPTX or DOCX file</small></button>
@@ -379,7 +404,7 @@ export default function Home() {
       <main className="middle-column">
       <section className="canvas">
         <div className="canvas-head"><div><p className="eyebrow">Live course blueprint</p><h1>OBTL Canvas</h1></div><div className="canvas-actions"><button onClick={() => setLocked(locked.length ? [] : sections.map((_, i) => i))}>⌁ {locked.length ? "Unlock all" : "Lock all"}</button><button onClick={() => setOpen(open.length === sections.length ? [] : sections.map((_, i) => i))}>{open.length === sections.length ? "Collapse" : "Expand"} all</button></div></div>
-        <div className="canvas-sections">{sections.map((section, index) => { const isOpen=open.includes(index), isLocked=locked.includes(index); return <article className={isOpen ? "canvas-card expanded" : "canvas-card"} key={section[0]}><div className="card-bar"><button className="card-title" onClick={() => setOpen(isOpen ? open.filter(i=>i!==index) : [...open,index])}><span>{String(index+1).padStart(2,"0")}</span><b>{section[0]}</b></button><div><button className={isLocked ? "lock locked" : "lock"} onClick={() => setLocked(isLocked ? locked.filter(i=>i!==index) : [...locked,index])}>{isLocked ? "● Locked" : "○ Editable"}</button><button onClick={() => setOpen(isOpen ? open.filter(i=>i!==index) : [...open,index])}>{isOpen ? "−" : "+"}</button></div></div>{isOpen && <div className={isLocked ? "card-content locked-content" : "card-content"}><p className="section-guidance"><span>Writing guidance</span>{CANVAS_WRITING_GUIDANCE[index]}</p>{renderSectionEditor(index, isLocked)}<small className="edit-status">{isLocked ? "Unlock this section to edit" : "Changes are reflected instantly in the canvas"}</small></div>}</article>})}</div>
+        <div className="canvas-sections">{sections.map((section, index) => { const isOpen=open.includes(index), isLocked=locked.includes(index), isFocused=focusedSections.includes(index); return <article data-section-index={index} className={`${isOpen ? "canvas-card expanded" : "canvas-card"}${isFocused ? " workflow-focused" : ""}`} key={section[0]}><div className="card-bar"><button className="card-title" onClick={() => setOpen(isOpen ? open.filter(i=>i!==index) : [...open,index])}><span>{String(index+1).padStart(2,"0")}</span><b>{section[0]}</b></button><div><button className={isLocked ? "lock locked" : "lock"} onClick={() => setLocked(isLocked ? locked.filter(i=>i!==index) : [...locked,index])}>{isLocked ? "● Locked" : "○ Editable"}</button><button onClick={() => setOpen(isOpen ? open.filter(i=>i!==index) : [...open,index])}>{isOpen ? "−" : "+"}</button></div></div>{isOpen && <div className={isLocked ? "card-content locked-content" : "card-content"}><p className="section-guidance"><span>Writing guidance</span>{CANVAS_WRITING_GUIDANCE[index]}</p>{renderSectionEditor(index, isLocked)}<small className="edit-status">{isLocked ? "Unlock this section to edit" : "Changes are reflected instantly in the canvas"}</small></div>}</article>})}</div>
       </section>
       <section className={specialistResult ? "synthesis-bar has-result" : "synthesis-bar"} aria-label="Latest synthesis"><div className="synthesis-label"><span>✦</span><div><p>Latest synthesis</p><em>{specialistResult ? "Ready for review" : "No pending changes"}</em></div></div><div className="synthesis-summary"><strong>{specialistResult ? "Course Coherence recommendations" : "Your canvas remains in your control"}</strong><p>{specialistResult?.summary ?? "Ask Course Coherence for a review. It will coordinate the relevant specialists before proposing any canvas changes."}</p></div><div className="tags">{(specialistResult?.contributors ?? ["Course Coherence"]).map((name) => <span key={name}>{name}</span>)}{specialistResult && <span>{specialistResult.proposals.length} proposed changes</span>}</div><div className="synthesis-actions">{specialistResult && <><button onClick={() => setSpecialistResult(null)}>Dismiss</button><button className="apply" onClick={applySpecialistProposals} disabled={!specialistResult.proposals.length}>Apply to canvas</button></>}</div></section>
       </main>
