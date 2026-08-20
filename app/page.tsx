@@ -8,14 +8,12 @@ const workflow = [
   ["02", "Determine Evidence", "Determine how students will demonstrate achievement of learning outcomes through assessments"],
   ["03", "Plan Experiences", "Design learning activities that build toward the goal"],
   ["04", "Align & Refine", "Check alignment between outcomes, assessment and learning activities"],
-  ["05", "Review & Finalise", "Check alignment between outcomes, assessment and learning activities"],
 ];
 const workflowSections = [
-  [0, 1, 2],
-  [4],
-  [3, 5, 6],
-  [1, 2, 3, 4, 5, 6],
-  [0, 1, 2, 3, 4, 5, 6],
+  [1, 2],
+  [2, 3, 4],
+  [2, 3, 4, 5, 6],
+  [],
 ];
 const initialSections = [
   ["Course Information", "Course code: CS4008\nCourse title: Artificial Intelligence Literacies"],
@@ -232,8 +230,10 @@ export default function Home() {
     const targets = workflowSections[index];
     setActiveStep(index);
     setFocusedSections(targets);
-    setOpen(targets);
-    window.setTimeout(() => document.querySelector(`[data-section-index="${targets[0]}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+    if (targets.length) {
+      setOpen(targets);
+      window.setTimeout(() => document.querySelector(`[data-section-index="${targets[0]}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+    }
   };
   const runAlignmentReview = async () => {
     selectWorkflowStep(3);
@@ -347,7 +347,7 @@ export default function Home() {
       setCourseTitle(typeof draft?.courseTitle === "string" ? draft.courseTitle : course.title);
       if (draft) {
         if (typeof draft.courseFile === "string") setCourseFile(draft.courseFile);
-        if (typeof draft.activeStep === "number") setActiveStep(draft.activeStep);
+        if (typeof draft.activeStep === "number") setActiveStep(Math.min(Math.max(draft.activeStep, 0), workflow.length - 1));
         if (Array.isArray(draft.sections)) setSections(draft.sections as string[][]);
         if (Array.isArray(draft.outcomes)) setOutcomes(draft.outcomes as string[]);
         if (Array.isArray(draft.topics)) setTopics(draft.topics as string[]);
