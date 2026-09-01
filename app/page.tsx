@@ -431,7 +431,7 @@ export default function Home() {
   return <main className="app-shell">
     <header className="topbar">
       <div className="brand planner-brand"><button className="back-to-dashboard" onClick={returnToDashboard} aria-label="Back to course planners">←</button><span className="brand-mark">C</span><div><strong>Course Agentic Planner</strong><small>Outcomes-based course design workspace</small></div></div>
-      <div className="title-control"><span>Planner</span><b>{courseCode} · {courseTitle}</b><button aria-label="Edit title">✎</button></div>
+      <div className="title-control"><span>Planner</span><b>{courseCode} · {courseTitle}</b></div>
       <div className="top-actions"><div className="save-control"><span className="last-modified">Last modified: {lastModified ? modifiedAtLabel(lastModified) : "Not yet saved"}</span><button className={`ghost save-draft ${saveStatus}`} disabled={saveStatus === "saving"} onClick={() => void saveDraft()}>{saveStatus === "saving" ? "Saving…" : saveStatus === "saved" ? "✓ Draft saved" : saveStatus === "error" ? "Try save again" : "Save draft"}</button></div><button className="primary">Export course plan ↗</button><span className="avatar">IN</span></div>
     </header>
     <div className="workspace">
