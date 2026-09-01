@@ -26,10 +26,10 @@ function extractJson(text: string) {
   return JSON.parse(candidate);
 }
 
-async function callAi4Learn(payload: { message: string; canvas: unknown }, userId: string) {
+async function callAi4Learn(payload: { message: string; canvas: unknown }, cookie: string) {
   let lastError = "AI 4Learn analysis failed.";
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const response = await runAi4Learn(new Request("http://internal/ai4learn", { method: "POST", headers: { "Content-Type": "application/json", "oai-authenticated-user-id": userId }, body: JSON.stringify(payload) }));
+    const response = await runAi4Learn(new Request("http://internal/ai4learn", { method: "POST", headers: { "Content-Type": "application/json", cookie }, body: JSON.stringify(payload) }));
     const body = await response.json() as { result?: SpecialistResult; error?: string };
     if (response.ok && body.result) return body.result;
     lastError = body.error || lastError;
@@ -39,7 +39,7 @@ async function callAi4Learn(payload: { message: string; canvas: unknown }, userI
 
 export async function POST(request: Request) {
   try {
-    const userId = authenticatedUserId(request);
+    const userId = await authenticatedUserId(request);
     if (!userId) return NextResponse.json({ error: "Sign in is required." }, { status: 401 });
     const body = await request.json() as { message?: unknown; canvas?: unknown; enabledSpecialists?: unknown };
     const message = cleanText(body.message);
@@ -47,7 +47,7 @@ export async function POST(request: Request) {
     const enabled = Array.isArray(body.enabledSpecialists) ? body.enabledSpecialists.filter((item) => item === "ai4learn") : ["ai4learn"];
     if (!enabled.length) return NextResponse.json({ error: "Turn on at least one available instructional-approach subagent." }, { status: 400 });
 
-    const ai4learn = await callAi4Learn({ message, canvas: body.canvas }, userId);
+    const ai4learn = await callAi4Learn({ message, canvas: body.canvas }, request.headers.get("cookie") ?? "");
     const apiKey = process.env.AWS_BEARER_TOKEN_BEDROCK;
     const region = process.env.AWS_REGION ?? "ap-southeast-2";
     const modelId = process.env.BEDROCK_MODEL_ID ?? "amazon.nova-lite-v1:0";
