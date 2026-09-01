@@ -3,6 +3,7 @@ import { POST as runIdel } from "../idel-aligner/route";
 import { POST as runAssessment } from "../assessment-designer/route";
 import { POST as runInstructionalApproaches } from "../instructional-approaches/route";
 import { OBTL_WRITING_STANDARD } from "../../../lib/obtl-guidance";
+import { authenticatedUserId } from "../../../lib/request-auth";
 
 export const runtime = "edge";
 
@@ -40,12 +41,13 @@ function routeRequest(message: string) {
 async function callSpecialist(
   runner: (request: Request) => Promise<Response>,
   payload: { message: string; canvas: unknown },
+  userId: string,
 ) {
   let lastError = "Specialist analysis failed.";
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const response = await runner(new Request("http://internal/specialist", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "oai-authenticated-user-id": userId },
       body: JSON.stringify(payload),
     }));
     const body = await response.json() as { result?: SpecialistResult; error?: string };
@@ -57,6 +59,8 @@ async function callSpecialist(
 
 export async function POST(request: Request) {
   try {
+    const userId = authenticatedUserId(request);
+    if (!userId) return NextResponse.json({ error: "Sign in is required." }, { status: 401 });
     const body = await request.json() as { message?: unknown; canvas?: unknown; enabledSpecialists?: unknown };
     const message = cleanText(body.message);
     if (!message) return NextResponse.json({ error: "Please enter a request for Course Coherence." }, { status: 400 });
@@ -78,9 +82,9 @@ export async function POST(request: Request) {
       ? { useIdel: enabledSpecialists.includes("idel"), useAssessment: enabledSpecialists.includes("assessment") }
       : automaticRouting;
     const requested: Array<{ name: string; run: Promise<SpecialistResult> }> = [];
-    if (routing.useIdel) requested.push({ name: "IDEL Aligner", run: callSpecialist(runIdel, { message, canvas: body.canvas }) });
-    if (routing.useAssessment) requested.push({ name: "Assessment Designer", run: callSpecialist(runAssessment, { message, canvas: body.canvas }) });
-    if (enabledSpecialists.includes("ai4learn")) requested.push({ name: "AI 4Learn", run: callSpecialist(runInstructionalApproaches, { message, canvas: body.canvas }) });
+    if (routing.useIdel) requested.push({ name: "IDEL Aligner", run: callSpecialist(runIdel, { message, canvas: body.canvas }, userId) });
+    if (routing.useAssessment) requested.push({ name: "Assessment Designer", run: callSpecialist(runAssessment, { message, canvas: body.canvas }, userId) });
+    if (enabledSpecialists.includes("ai4learn")) requested.push({ name: "AI 4Learn", run: callSpecialist(runInstructionalApproaches, { message, canvas: body.canvas }, userId) });
 
     const settled = await Promise.allSettled(requested.map((item) => item.run));
     const specialistOutputs = settled.flatMap((result, index) => result.status === "fulfilled" ? [{ name: requested[index].name, result: result.value }] : []);
