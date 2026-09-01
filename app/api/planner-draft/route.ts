@@ -1,6 +1,7 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { plannerDrafts } from "../../../db/schema";
+import { authenticatedUserId } from "../../../lib/request-auth";
 
 export const runtime = "edge";
 
@@ -17,10 +18,12 @@ function errorResponse(error: unknown) {
 }
 
 export async function GET(request: Request) {
+  const ownerId = authenticatedUserId(request);
+  if (!ownerId) return Response.json({ error: "Sign in is required." }, { status: 401 });
   const courseCode = courseCodeFrom(request);
   try {
     if (!courseCode) {
-      const rows = await getDb().select().from(plannerDrafts).orderBy(desc(plannerDrafts.updatedAt)).limit(100);
+      const rows = await getDb().select().from(plannerDrafts).where(eq(plannerDrafts.ownerId, ownerId)).orderBy(desc(plannerDrafts.updatedAt)).limit(100);
       const deletedPlannerKeys: string[] = [];
       const planners = rows.flatMap((row) => {
         try {
@@ -36,7 +39,7 @@ export async function GET(request: Request) {
       });
       return Response.json({ planners, deletedPlannerKeys });
     }
-    const [row] = await getDb().select().from(plannerDrafts).where(eq(plannerDrafts.courseCode, courseCode)).limit(1);
+    const [row] = await getDb().select().from(plannerDrafts).where(and(eq(plannerDrafts.ownerId, ownerId), eq(plannerDrafts.courseCode, courseCode))).limit(1);
     if (!row) return Response.json({ draft: null });
     const draft = JSON.parse(row.draftJson) as { deleted?: unknown };
     if (draft.deleted === true) return Response.json({ draft: null, deleted: true });
@@ -47,10 +50,12 @@ export async function GET(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const ownerId = authenticatedUserId(request);
+  if (!ownerId) return Response.json({ error: "Sign in is required." }, { status: 401 });
   const courseCode = courseCodeFrom(request);
   if (!courseCode) return Response.json({ error: "Course code is required." }, { status: 400 });
   try {
-    await getDb().insert(plannerDrafts).values({ courseCode, courseTitle: "Deleted course", draftJson: JSON.stringify({ deleted: true }) }).onConflictDoUpdate({ target: plannerDrafts.courseCode, set: { courseTitle: "Deleted course", draftJson: JSON.stringify({ deleted: true }), updatedAt: sql`CURRENT_TIMESTAMP` } });
+    await getDb().insert(plannerDrafts).values({ ownerId, courseCode, courseTitle: "Deleted course", draftJson: JSON.stringify({ deleted: true }) }).onConflictDoUpdate({ target: [plannerDrafts.ownerId, plannerDrafts.courseCode], set: { courseTitle: "Deleted course", draftJson: JSON.stringify({ deleted: true }), updatedAt: sql`CURRENT_TIMESTAMP` } });
     return Response.json({ deleted: true });
   } catch (error) {
     return errorResponse(error);
@@ -58,6 +63,8 @@ export async function DELETE(request: Request) {
 }
 
 export async function PUT(request: Request) {
+  const ownerId = authenticatedUserId(request);
+  if (!ownerId) return Response.json({ error: "Sign in is required." }, { status: 401 });
   try {
     const payload = await request.json() as { courseCode?: unknown; courseTitle?: unknown; draft?: unknown };
     const courseCode = typeof payload.courseCode === "string" ? payload.courseCode.trim().slice(0, 100) : "";
@@ -66,8 +73,8 @@ export async function PUT(request: Request) {
     const draftJson = JSON.stringify(payload.draft);
     if (new TextEncoder().encode(draftJson).byteLength > MAX_DRAFT_BYTES) return Response.json({ error: "This draft is too large to save." }, { status: 413 });
     const db = getDb();
-    await db.insert(plannerDrafts).values({ courseCode, courseTitle, draftJson }).onConflictDoUpdate({ target: plannerDrafts.courseCode, set: { courseTitle, draftJson, updatedAt: sql`CURRENT_TIMESTAMP` } });
-    const [row] = await db.select({ updatedAt: plannerDrafts.updatedAt }).from(plannerDrafts).where(eq(plannerDrafts.courseCode, courseCode)).limit(1);
+    await db.insert(plannerDrafts).values({ ownerId, courseCode, courseTitle, draftJson }).onConflictDoUpdate({ target: [plannerDrafts.ownerId, plannerDrafts.courseCode], set: { courseTitle, draftJson, updatedAt: sql`CURRENT_TIMESTAMP` } });
+    const [row] = await db.select({ updatedAt: plannerDrafts.updatedAt }).from(plannerDrafts).where(and(eq(plannerDrafts.ownerId, ownerId), eq(plannerDrafts.courseCode, courseCode))).limit(1);
     return Response.json({ saved: true, updatedAt: row?.updatedAt ?? null });
   } catch (error) {
     return errorResponse(error);
