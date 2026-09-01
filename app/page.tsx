@@ -213,7 +213,7 @@ export default function Home() {
     event.preventDefault(); setLoginPending(true); setLoginError("");
     try {
       const response = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: loginEmail, password: loginPassword }) });
-      const payload = await response.json() as { user?: AppUser; error?: string };
+      const payload = await response.json().catch(() => ({ error: "Sign in is temporarily unavailable. Please try again." })) as { user?: AppUser; error?: string };
       if (!response.ok || !payload.user) throw new Error(payload.error || "Sign in failed.");
       setAppUser(payload.user); setLoginPassword(""); setPlannerSummaries(payload.user.id === "demo-user-abc" ? coursePlanners : []);
     } catch (error) { setLoginError(error instanceof Error ? error.message : "Sign in failed."); }
