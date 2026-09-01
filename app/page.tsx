@@ -176,6 +176,13 @@ export default function Home() {
   const [loginError, setLoginError] = useState("");
   const [loginPending, setLoginPending] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [passwordPending, setPasswordPending] = useState(false);
   const refreshPlannerSummaries = async () => {
     try {
       const response = await fetch("/api/planner-draft");
@@ -208,6 +215,14 @@ export default function Home() {
     })();
   }, []);
   useEffect(() => { if (appUser) void refreshPlannerSummaries(); }, [appUser]);
+  useEffect(() => {
+    const savedTheme = window.localStorage.getItem("course-planner-theme");
+    if (savedTheme === "dark") setTheme("dark");
+  }, []);
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem("course-planner-theme", theme);
+  }, [theme]);
 
   const signIn = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setLoginPending(true); setLoginError("");
@@ -223,8 +238,21 @@ export default function Home() {
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
     setAppUser(null); setView("dashboard"); setAccountMenuOpen(false); setPlannerSummaries([]); setLoginPassword("");
   };
+  const changePassword = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); setPasswordError("");
+    if (newPassword !== confirmPassword) { setPasswordError("The new passwords do not match."); return; }
+    setPasswordPending(true);
+    try {
+      const response = await fetch("/api/auth/change-password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ currentPassword, newPassword }) });
+      const payload = await response.json().catch(() => ({ error: "The password could not be changed." })) as { changed?: boolean; error?: string };
+      if (!response.ok || !payload.changed) throw new Error(payload.error || "The password could not be changed.");
+      setPasswordDialogOpen(false); setCurrentPassword(""); setNewPassword(""); setConfirmPassword("");
+      window.alert("Your password has been changed.");
+    } catch (error) { setPasswordError(error instanceof Error ? error.message : "The password could not be changed."); }
+    finally { setPasswordPending(false); }
+  };
   const userInitials = appUser?.displayName.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase() || "U";
-  const accountControl = <div className="account-control"><button className="avatar avatar-button" aria-label="Open account menu" aria-expanded={accountMenuOpen} onClick={(event) => { event.stopPropagation(); setAccountMenuOpen((current) => !current); }}>{userInitials}</button>{accountMenuOpen && <div className="account-popover"><strong>{appUser?.displayName}</strong><span>{appUser?.email}</span><button onClick={() => void signOut()}>Sign out</button></div>}</div>;
+  const accountControl = <><div className="account-control"><button className="avatar avatar-button" aria-label="Open account menu" aria-expanded={accountMenuOpen} onClick={(event) => { event.stopPropagation(); setAccountMenuOpen((current) => !current); }}>{userInitials}</button>{accountMenuOpen && <div className="account-popover" onClick={(event) => event.stopPropagation()}><strong>{appUser?.displayName}</strong><span>{appUser?.email}</span><div className="theme-control"><span>Appearance</span><button aria-label={`Switch to ${theme === "light" ? "dark" : "light"} mode`} onClick={() => setTheme((current) => current === "light" ? "dark" : "light")}>{theme === "light" ? "☾ Dark" : "☀ Light"}</button></div><button onClick={() => { setAccountMenuOpen(false); setPasswordDialogOpen(true); setPasswordError(""); }}>Change password</button><button className="sign-out" onClick={() => void signOut()}>Sign out</button></div>}</div>{passwordDialogOpen && <div className="modal-backdrop" role="presentation" onMouseDown={() => !passwordPending && setPasswordDialogOpen(false)}><section className="password-dialog" role="dialog" aria-modal="true" aria-labelledby="password-dialog-title" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" aria-label="Close password dialog" disabled={passwordPending} onClick={() => setPasswordDialogOpen(false)}>×</button><p className="eyebrow">Account security</p><h2 id="password-dialog-title">Change password</h2><form onSubmit={changePassword}><label>Current password<input type="password" autoComplete="current-password" required value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} /></label><label>New password<input type="password" autoComplete="new-password" minLength={8} required value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /></label><label>Confirm new password<input type="password" autoComplete="new-password" minLength={8} required value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} /></label>{passwordError && <p className="auth-error" role="alert">{passwordError}</p>}<div className="modal-actions"><button type="button" disabled={passwordPending} onClick={() => setPasswordDialogOpen(false)}>Cancel</button><button className="primary" disabled={passwordPending}>{passwordPending ? "Changing…" : "Change password"}</button></div></form></section></div>}</>;
   const cloneCourse = async (course: (typeof coursePlanners)[number]) => {
     setOpenCourseMenu(null);
     if (!window.confirm(`Clone ${course.code} · ${course.title}?\n\nThis will create a separate draft that you can edit independently.`)) return;
@@ -467,7 +495,7 @@ export default function Home() {
   const returnToDashboard = () => { if (window.confirm("Return to your course planners? Please save any changes you want to keep before leaving this canvas.")) { setView("dashboard"); void refreshPlannerSummaries(); } };
 
   if (authLoading) return <main className="auth-shell"><div className="auth-loading">Loading your workspace…</div></main>;
-  if (!appUser) return <main className="auth-shell"><section className="auth-card"><div className="brand auth-brand"><span className="brand-mark">C</span><div><strong>Course Agentic Planner</strong><small>Outcomes-based course design workspace</small></div></div><p className="eyebrow">Welcome back</p><h1>Sign in to your workspace</h1><p className="auth-copy">Access your course planners and continue designing with the specialist agents.</p><form onSubmit={signIn}><label>Email address<input type="email" autoComplete="username" required value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} placeholder="you@demo.local" /></label><label>Password<input type="password" autoComplete="current-password" required value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} /></label>{loginError && <p className="auth-error" role="alert">{loginError}</p>}<button disabled={loginPending}>{loginPending ? "Signing in…" : "Sign in"}</button></form><small className="auth-footnote">Authorised users only. Your course designs remain private to your account.</small></section></main>;
+  if (!appUser) return <main className="auth-shell"><section className="auth-card"><div className="brand auth-brand"><span className="brand-mark">C</span><div><strong>Course Agentic Planner</strong><small>Outcomes-based course design workspace</small></div></div><form onSubmit={signIn}><label>Email address<input type="email" autoComplete="username" required value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} placeholder="you@demo.local" /></label><label>Password<input type="password" autoComplete="current-password" required value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} /></label>{loginError && <p className="auth-error" role="alert">{loginError}</p>}<button disabled={loginPending}>{loginPending ? "Signing in…" : "Sign in"}</button></form><small className="auth-footnote">Authorised users only. Your course designs remain private to your account.</small></section></main>;
 
   const renderSectionEditor = (index: number, isLocked: boolean) => {
     if (index === 0) return <div className="field-grid"><label>Course Code<input value={courseCode} readOnly={isLocked} onChange={(event) => setCourseCode(event.target.value)} /></label><label>Course Title<input value={courseTitle} readOnly={isLocked} onChange={(event) => setCourseTitle(event.target.value)} /></label></div>;
