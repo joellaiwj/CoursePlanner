@@ -18,7 +18,7 @@ function errorResponse(error: unknown) {
 }
 
 export async function GET(request: Request) {
-  const ownerId = authenticatedUserId(request);
+  const ownerId = await authenticatedUserId(request);
   if (!ownerId) return Response.json({ error: "Sign in is required." }, { status: 401 });
   const courseCode = courseCodeFrom(request);
   try {
@@ -50,7 +50,7 @@ export async function GET(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const ownerId = authenticatedUserId(request);
+  const ownerId = await authenticatedUserId(request);
   if (!ownerId) return Response.json({ error: "Sign in is required." }, { status: 401 });
   const courseCode = courseCodeFrom(request);
   if (!courseCode) return Response.json({ error: "Course code is required." }, { status: 400 });
@@ -63,7 +63,7 @@ export async function DELETE(request: Request) {
 }
 
 export async function PUT(request: Request) {
-  const ownerId = authenticatedUserId(request);
+  const ownerId = await authenticatedUserId(request);
   if (!ownerId) return Response.json({ error: "Sign in is required." }, { status: 401 });
   try {
     const payload = await request.json() as { courseCode?: unknown; courseTitle?: unknown; draft?: unknown };
