@@ -7,3 +7,10 @@ export async function verifyPassword(password: string, saltHex: string, expected
   const derived = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: hexToBytes(saltHex), iterations: 100_000 }, key, 256);
   return timingSafeEqual(bytesToHex(new Uint8Array(derived)), expectedHash);
 }
+
+export async function hashPassword(password: string) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]);
+  const derived = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations: 100_000 }, key, 256);
+  return { salt: bytesToHex(salt), hash: bytesToHex(new Uint8Array(derived)) };
+}
