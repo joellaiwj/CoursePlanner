@@ -80,7 +80,7 @@ function extractJson(text: string) {
 
 export async function POST(request: Request) {
   try {
-    if (!authenticatedUserId(request)) return NextResponse.json({ error: "Sign in is required." }, { status: 401 });
+    if (!(await authenticatedUserId(request))) return NextResponse.json({ error: "Sign in is required." }, { status: 401 });
     const body = await request.json() as { message?: unknown; canvas?: unknown };
     const message = cleanText(body.message, 4_000).trim();
     if (!message) return NextResponse.json({ error: "Please enter a request for the Assessment Designer." }, { status: 400 });
