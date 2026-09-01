@@ -94,6 +94,7 @@ type SpecialistResult = {
   contributors?: string[];
 };
 type ChatMessage = { role: "user" | "assistant"; text: string; agent?: string; findings?: SpecialistResult["subagentFindings"] };
+type AppUser = { id: string; email: string; displayName: string };
 const STARTING_CHAT_MESSAGE: ChatMessage = { role: "assistant", agent: "Course Coherence", text: "Ask me to review or revise your course design, and I’ll coordinate the relevant specialist agents to address your request." };
 
 function normaliseProposal(value: unknown): SpecialistProposal | null {
@@ -168,6 +169,13 @@ export default function Home() {
   const [lastModified, setLastModified] = useState("");
   const [openCourseMenu, setOpenCourseMenu] = useState<string | null>(null);
   const [courseAction, setCourseAction] = useState<string | null>(null);
+  const [appUser, setAppUser] = useState<AppUser | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [loginPending, setLoginPending] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const refreshPlannerSummaries = async () => {
     try {
       const response = await fetch("/api/planner-draft");
@@ -175,7 +183,8 @@ export default function Home() {
       if (!response.ok || !Array.isArray(payload.planners)) return;
       const deleted = new Set(Array.isArray(payload.deletedPlannerKeys) ? payload.deletedPlannerKeys : []);
       const unused = new Map(payload.planners.map((planner) => [planner.plannerKey, planner]));
-      const merged = coursePlanners.filter((planner) => !deleted.has(planner.plannerKey)).map((planner) => {
+      const basePlanners = appUser?.id === "demo-user-abc" ? coursePlanners : [];
+      const merged = basePlanners.filter((planner) => !deleted.has(planner.plannerKey)).map((planner) => {
         let draft = unused.get(planner.plannerKey);
         if (!draft) draft = [...unused.values()].find((candidate) => candidate.courseTitle.trim().toLowerCase() === planner.title.trim().toLowerCase());
         if (!draft) return planner;
@@ -188,7 +197,34 @@ export default function Home() {
       // Keep the built-in dashboard available if saved summaries cannot be loaded.
     }
   };
-  useEffect(() => { void refreshPlannerSummaries(); }, []);
+  useEffect(() => {
+    void (async () => {
+      try {
+        const response = await fetch("/api/auth/session");
+        const payload = await response.json() as { user?: AppUser | null };
+        setAppUser(response.ok && payload.user ? payload.user : null);
+      } catch { setAppUser(null); }
+      finally { setAuthLoading(false); }
+    })();
+  }, []);
+  useEffect(() => { if (appUser) void refreshPlannerSummaries(); }, [appUser]);
+
+  const signIn = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); setLoginPending(true); setLoginError("");
+    try {
+      const response = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: loginEmail, password: loginPassword }) });
+      const payload = await response.json() as { user?: AppUser; error?: string };
+      if (!response.ok || !payload.user) throw new Error(payload.error || "Sign in failed.");
+      setAppUser(payload.user); setLoginPassword(""); setPlannerSummaries(payload.user.id === "demo-user-abc" ? coursePlanners : []);
+    } catch (error) { setLoginError(error instanceof Error ? error.message : "Sign in failed."); }
+    finally { setLoginPending(false); }
+  };
+  const signOut = async () => {
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
+    setAppUser(null); setView("dashboard"); setAccountMenuOpen(false); setPlannerSummaries([]); setLoginPassword("");
+  };
+  const userInitials = appUser?.displayName.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase() || "U";
+  const accountControl = <div className="account-control"><button className="avatar avatar-button" aria-label="Open account menu" aria-expanded={accountMenuOpen} onClick={(event) => { event.stopPropagation(); setAccountMenuOpen((current) => !current); }}>{userInitials}</button>{accountMenuOpen && <div className="account-popover"><strong>{appUser?.displayName}</strong><span>{appUser?.email}</span><button onClick={() => void signOut()}>Sign out</button></div>}</div>;
   const cloneCourse = async (course: (typeof coursePlanners)[number]) => {
     setOpenCourseMenu(null);
     if (!window.confirm(`Clone ${course.code} · ${course.title}?\n\nThis will create a separate draft that you can edit independently.`)) return;
@@ -416,6 +452,9 @@ export default function Home() {
   };
   const returnToDashboard = () => { if (window.confirm("Return to your course planners? Please save any changes you want to keep before leaving this canvas.")) { setView("dashboard"); void refreshPlannerSummaries(); } };
 
+  if (authLoading) return <main className="auth-shell"><div className="auth-loading">Loading your workspace…</div></main>;
+  if (!appUser) return <main className="auth-shell"><section className="auth-card"><div className="brand auth-brand"><span className="brand-mark">C</span><div><strong>Course Agentic Planner</strong><small>Outcomes-based course design workspace</small></div></div><p className="eyebrow">Welcome back</p><h1>Sign in to your workspace</h1><p className="auth-copy">Access your course planners and continue designing with the specialist agents.</p><form onSubmit={signIn}><label>Email address<input type="email" autoComplete="username" required value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} placeholder="you@demo.local" /></label><label>Password<input type="password" autoComplete="current-password" required value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} /></label>{loginError && <p className="auth-error" role="alert">{loginError}</p>}<button disabled={loginPending}>{loginPending ? "Signing in…" : "Sign in"}</button></form><small className="auth-footnote">Authorised users only. Your course designs remain private to your account.</small></section></main>;
+
   const renderSectionEditor = (index: number, isLocked: boolean) => {
     if (index === 0) return <div className="field-grid"><label>Course Code<input value={courseCode} readOnly={isLocked} onChange={(event) => setCourseCode(event.target.value)} /></label><label>Course Title<input value={courseTitle} readOnly={isLocked} onChange={(event) => setCourseTitle(event.target.value)} /></label></div>;
     if (index === 2) return <div className="list-editor"><ol>{outcomes.map((outcome, outcomeIndex) => <li key={outcomeIndex}><span>LO{outcomeIndex + 1}</span><textarea value={outcome} readOnly={isLocked} aria-label={`Learning outcome ${outcomeIndex + 1}`} onChange={(event) => setOutcomes((current) => current.map((item, i) => i === outcomeIndex ? event.target.value : item))} />{!isLocked && <button onClick={() => setOutcomes((current) => current.filter((_, i) => i !== outcomeIndex))} aria-label={`Delete learning outcome ${outcomeIndex + 1}`}>×</button>}</li>)}</ol>{!isLocked && <button className="add-row" onClick={() => setOutcomes((current) => [...current, ""])}>＋ Add learning outcome</button>}</div>;
@@ -426,13 +465,13 @@ export default function Home() {
     return <textarea aria-label={`Edit ${sections[index][0]}`} value={sections[index][1]} readOnly={isLocked} onChange={(event) => updateSection(index, event.target.value)} />;
   };
 
-  if (view === "dashboard") { const visibleCourses = plannerSummaries.filter((course) => `${course.code} ${course.title}`.toLowerCase().includes(search.toLowerCase())); return <main className="landing-shell" onClick={() => setOpenCourseMenu(null)}><header className="landing-topbar"><div className="brand"><span className="brand-mark">C</span><div><strong>Course Agentic Planner</strong><small>Outcomes-based course design workspace</small></div></div><div className="landing-user"><button>Help</button><span className="avatar">IN</span></div></header><section className="landing-hero"><p className="eyebrow">Your course design workspace</p><h1>Course planners</h1><p>Find, continue and review your outcomes-based course designs.</p><label className="course-search"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by course code or title"/></label></section><section className="planner-library"><div className="library-heading"><div><h2>Your planners</h2><p>{visibleCourses.length} {visibleCourses.length === 1 ? "course" : "courses"}</p></div><button className="new-planner">＋ New course planner</button></div><div className="course-grid clean">{visibleCourses.map((course) => <article className={`course-tile ${course.accent}${courseAction === course.plannerKey ? " busy" : ""}`} role="button" tabIndex={0} onClick={() => void openPlanner(course)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); void openPlanner(course); } }} key={course.plannerKey}><div className="course-tile-top"><span>{course.code}</span><div className="course-menu" onClick={(event) => event.stopPropagation()}><button className="course-menu-trigger" aria-label={`Options for ${course.code}`} aria-haspopup="menu" aria-expanded={openCourseMenu === course.plannerKey} disabled={courseAction !== null} onClick={() => setOpenCourseMenu((current) => current === course.plannerKey ? null : course.plannerKey)}>•••</button>{openCourseMenu === course.plannerKey && <div className="course-menu-popover" role="menu"><button role="menuitem" onClick={() => void cloneCourse(course)}>Clone course</button><button className="delete" role="menuitem" onClick={() => void deleteCourse(course)}>Delete course</button></div>}</div></div><h3>{course.title}</h3><div className="course-tile-foot"><small>{courseAction === course.plannerKey ? "Updating…" : course.updated}</small></div></article>)}</div>{visibleCourses.length === 0 && <div className="empty-courses"><span>⌕</span><h3>No matching planners</h3><p>Try another course code or title.</p></div>}</section></main>; }
+  if (view === "dashboard") { const visibleCourses = plannerSummaries.filter((course) => `${course.code} ${course.title}`.toLowerCase().includes(search.toLowerCase())); return <main className="landing-shell" onClick={() => { setOpenCourseMenu(null); setAccountMenuOpen(false); }}><header className="landing-topbar"><div className="brand"><span className="brand-mark">C</span><div><strong>Course Agentic Planner</strong><small>Outcomes-based course design workspace</small></div></div><div className="landing-user"><button>Help</button>{accountControl}</div></header><section className="landing-hero"><p className="eyebrow">Your course design workspace</p><h1>Course planners</h1><p>Find, continue and review your outcomes-based course designs.</p><label className="course-search"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by course code or title"/></label></section><section className="planner-library"><div className="library-heading"><div><h2>Your planners</h2><p>{visibleCourses.length} {visibleCourses.length === 1 ? "course" : "courses"}</p></div><button className="new-planner">＋ New course planner</button></div><div className="course-grid clean">{visibleCourses.map((course) => <article className={`course-tile ${course.accent}${courseAction === course.plannerKey ? " busy" : ""}`} role="button" tabIndex={0} onClick={() => void openPlanner(course)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); void openPlanner(course); } }} key={course.plannerKey}><div className="course-tile-top"><span>{course.code}</span><div className="course-menu" onClick={(event) => event.stopPropagation()}><button className="course-menu-trigger" aria-label={`Options for ${course.code}`} aria-haspopup="menu" aria-expanded={openCourseMenu === course.plannerKey} disabled={courseAction !== null} onClick={() => setOpenCourseMenu((current) => current === course.plannerKey ? null : course.plannerKey)}>•••</button>{openCourseMenu === course.plannerKey && <div className="course-menu-popover" role="menu"><button role="menuitem" onClick={() => void cloneCourse(course)}>Clone course</button><button className="delete" role="menuitem" onClick={() => void deleteCourse(course)}>Delete course</button></div>}</div></div><h3>{course.title}</h3><div className="course-tile-foot"><small>{courseAction === course.plannerKey ? "Updating…" : course.updated}</small></div></article>)}</div>{visibleCourses.length === 0 && <div className="empty-courses"><span>⌕</span><h3>No course planners yet</h3><p>Create a course planner to begin your workspace.</p></div>}</section></main>; }
 
   return <main className="app-shell">
     <header className="topbar">
       <div className="brand planner-brand"><button className="back-to-dashboard" onClick={returnToDashboard} aria-label="Back to course planners">←</button><span className="brand-mark">C</span><div><strong>Course Agentic Planner</strong><small>Outcomes-based course design workspace</small></div></div>
       <div className="title-control"><span>Planner</span><b>{courseCode} · {courseTitle}</b></div>
-      <div className="top-actions"><div className="save-control"><span className="last-modified">Last modified: {lastModified ? modifiedAtLabel(lastModified) : "Not yet saved"}</span><button className={`ghost save-draft ${saveStatus}`} disabled={saveStatus === "saving"} onClick={() => void saveDraft()}>{saveStatus === "saving" ? "Saving…" : saveStatus === "saved" ? "✓ Draft saved" : saveStatus === "error" ? "Try save again" : "Save draft"}</button></div><button className="primary">Export course plan ↗</button><span className="avatar">IN</span></div>
+      <div className="top-actions"><div className="save-control"><span className="last-modified">Last modified: {lastModified ? modifiedAtLabel(lastModified) : "Not yet saved"}</span><button className={`ghost save-draft ${saveStatus}`} disabled={saveStatus === "saving"} onClick={() => void saveDraft()}>{saveStatus === "saving" ? "Saving…" : saveStatus === "saved" ? "✓ Draft saved" : saveStatus === "error" ? "Try save again" : "Save draft"}</button></div><button className="primary">Export course plan ↗</button>{accountControl}</div>
     </header>
     <div className="workspace">
       <aside className="left-rail">
