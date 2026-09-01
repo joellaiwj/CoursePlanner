@@ -166,13 +166,16 @@ export default function Home() {
   const [specialistError, setSpecialistError] = useState("");
   const [saveStatus, setSaveStatus] = useState<"idle" | "loading" | "saving" | "saved" | "error">("idle");
   const [lastModified, setLastModified] = useState("");
+  const [openCourseMenu, setOpenCourseMenu] = useState<string | null>(null);
+  const [courseAction, setCourseAction] = useState<string | null>(null);
   const refreshPlannerSummaries = async () => {
     try {
       const response = await fetch("/api/planner-draft");
-      const payload = await response.json() as { planners?: Array<{ plannerKey: string; courseCode: string; courseTitle: string; updatedAt: string }> };
+      const payload = await response.json() as { planners?: Array<{ plannerKey: string; courseCode: string; courseTitle: string; updatedAt: string }>; deletedPlannerKeys?: string[] };
       if (!response.ok || !Array.isArray(payload.planners)) return;
+      const deleted = new Set(Array.isArray(payload.deletedPlannerKeys) ? payload.deletedPlannerKeys : []);
       const unused = new Map(payload.planners.map((planner) => [planner.plannerKey, planner]));
-      const merged = coursePlanners.map((planner) => {
+      const merged = coursePlanners.filter((planner) => !deleted.has(planner.plannerKey)).map((planner) => {
         let draft = unused.get(planner.plannerKey);
         if (!draft) draft = [...unused.values()].find((candidate) => candidate.courseTitle.trim().toLowerCase() === planner.title.trim().toLowerCase());
         if (!draft) return planner;
@@ -186,6 +189,49 @@ export default function Home() {
     }
   };
   useEffect(() => { void refreshPlannerSummaries(); }, []);
+  const cloneCourse = async (course: (typeof coursePlanners)[number]) => {
+    setOpenCourseMenu(null);
+    if (!window.confirm(`Clone ${course.code} · ${course.title}?\n\nThis will create a separate draft that you can edit independently.`)) return;
+    setCourseAction(course.plannerKey);
+    try {
+      const usedKeys = new Set(plannerSummaries.map((planner) => planner.plannerKey.toUpperCase()));
+      const baseKey = `${course.code}-COPY`;
+      let plannerKey = baseKey;
+      let copyNumber = 2;
+      while (usedKeys.has(plannerKey.toUpperCase())) plannerKey = `${baseKey}-${copyNumber++}`;
+      const courseTitle = `${course.title} (Copy)`;
+      const sourceResponse = await fetch(`/api/planner-draft?courseCode=${encodeURIComponent(course.plannerKey)}`);
+      const sourcePayload = await sourceResponse.json() as { draft?: Record<string, unknown> | null };
+      const defaultDraft = {
+        courseFile: "", courseCode: plannerKey, courseTitle, activeStep: 0,
+        sections: initialSections, outcomes: ["Evaluate AI-generated outputs critically.", "Apply AI tools responsibly for different purposes.", "Collaborate effectively with people and AI systems."],
+        topics: ["AI foundations", "Metacognitive literacies", "Feedback literacies", "Responsible AI practice"], assessments: initialAssessments,
+        approaches: initialApproaches, schedule: initialSchedule, open: [1, 2], locked: [], enabledSubagents: ["idel", "assessment", "ai4learn"], chat: [STARTING_CHAT_MESSAGE], specialistResult: null,
+      };
+      const draft = { ...defaultDraft, ...(sourceResponse.ok && sourcePayload.draft ? sourcePayload.draft : {}), courseCode: plannerKey, courseTitle, chat: [STARTING_CHAT_MESSAGE], specialistResult: null };
+      const response = await fetch("/api/planner-draft", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ courseCode: plannerKey, courseTitle, draft }) });
+      if (!response.ok) throw new Error("Clone failed");
+      await refreshPlannerSummaries();
+    } catch {
+      window.alert("The course could not be cloned. Please try again.");
+    } finally {
+      setCourseAction(null);
+    }
+  };
+  const deleteCourse = async (course: (typeof coursePlanners)[number]) => {
+    setOpenCourseMenu(null);
+    if (!window.confirm(`Delete ${course.code} · ${course.title}?\n\nThis will permanently remove the course planner and its saved draft. This action cannot be undone.`)) return;
+    setCourseAction(course.plannerKey);
+    try {
+      const response = await fetch(`/api/planner-draft?courseCode=${encodeURIComponent(course.plannerKey)}`, { method: "DELETE" });
+      if (!response.ok) throw new Error("Delete failed");
+      await refreshPlannerSummaries();
+    } catch {
+      window.alert("The course could not be deleted. Please try again.");
+    } finally {
+      setCourseAction(null);
+    }
+  };
   const addCourseFile = (list: FileList | null) => {
     const file = list?.[0];
     if (file) setCourseFile(file.name);
@@ -380,7 +426,7 @@ export default function Home() {
     return <textarea aria-label={`Edit ${sections[index][0]}`} value={sections[index][1]} readOnly={isLocked} onChange={(event) => updateSection(index, event.target.value)} />;
   };
 
-  if (view === "dashboard") { const visibleCourses = plannerSummaries.filter((course) => `${course.code} ${course.title}`.toLowerCase().includes(search.toLowerCase())); return <main className="landing-shell"><header className="landing-topbar"><div className="brand"><span className="brand-mark">C</span><div><strong>Course Agentic Planner</strong><small>Outcomes-based course design workspace</small></div></div><div className="landing-user"><button>Help</button><span className="avatar">IN</span></div></header><section className="landing-hero"><p className="eyebrow">Your course design workspace</p><h1>Course planners</h1><p>Find, continue and review your outcomes-based course designs.</p><label className="course-search"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by course code or title"/></label></section><section className="planner-library"><div className="library-heading"><div><h2>Your planners</h2><p>{visibleCourses.length} {visibleCourses.length === 1 ? "course" : "courses"}</p></div><button className="new-planner">＋ New course planner</button></div><div className="course-grid clean">{visibleCourses.map((course) => <button className={`course-tile ${course.accent}`} onClick={() => void openPlanner(course)} key={course.plannerKey}><div className="course-tile-top"><span>{course.code}</span></div><h3>{course.title}</h3><div className="course-tile-foot"><small>{course.updated}</small></div></button>)}</div>{visibleCourses.length === 0 && <div className="empty-courses"><span>⌕</span><h3>No matching planners</h3><p>Try another course code or title.</p></div>}</section></main>; }
+  if (view === "dashboard") { const visibleCourses = plannerSummaries.filter((course) => `${course.code} ${course.title}`.toLowerCase().includes(search.toLowerCase())); return <main className="landing-shell" onClick={() => setOpenCourseMenu(null)}><header className="landing-topbar"><div className="brand"><span className="brand-mark">C</span><div><strong>Course Agentic Planner</strong><small>Outcomes-based course design workspace</small></div></div><div className="landing-user"><button>Help</button><span className="avatar">IN</span></div></header><section className="landing-hero"><p className="eyebrow">Your course design workspace</p><h1>Course planners</h1><p>Find, continue and review your outcomes-based course designs.</p><label className="course-search"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by course code or title"/></label></section><section className="planner-library"><div className="library-heading"><div><h2>Your planners</h2><p>{visibleCourses.length} {visibleCourses.length === 1 ? "course" : "courses"}</p></div><button className="new-planner">＋ New course planner</button></div><div className="course-grid clean">{visibleCourses.map((course) => <article className={`course-tile ${course.accent}${courseAction === course.plannerKey ? " busy" : ""}`} role="button" tabIndex={0} onClick={() => void openPlanner(course)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); void openPlanner(course); } }} key={course.plannerKey}><div className="course-tile-top"><span>{course.code}</span><div className="course-menu" onClick={(event) => event.stopPropagation()}><button className="course-menu-trigger" aria-label={`Options for ${course.code}`} aria-haspopup="menu" aria-expanded={openCourseMenu === course.plannerKey} disabled={courseAction !== null} onClick={() => setOpenCourseMenu((current) => current === course.plannerKey ? null : course.plannerKey)}>•••</button>{openCourseMenu === course.plannerKey && <div className="course-menu-popover" role="menu"><button role="menuitem" onClick={() => void cloneCourse(course)}>Clone course</button><button className="delete" role="menuitem" onClick={() => void deleteCourse(course)}>Delete course</button></div>}</div></div><h3>{course.title}</h3><div className="course-tile-foot"><small>{courseAction === course.plannerKey ? "Updating…" : course.updated}</small></div></article>)}</div>{visibleCourses.length === 0 && <div className="empty-courses"><span>⌕</span><h3>No matching planners</h3><p>Try another course code or title.</p></div>}</section></main>; }
 
   return <main className="app-shell">
     <header className="topbar">
